@@ -34,6 +34,7 @@ class Block(Statement):
 class VariableDeclaration(Statement):
     name: str = ""
     initializer: Optional[Expression] = None
+    type_annotation: Any = None
 
 
 @dataclass(slots=True)
@@ -47,6 +48,13 @@ class FunctionDeclaration(Statement):
     name: str = ""
     params: list[str] = field(default_factory=list)
     body: Block = field(default_factory=Block)
+    return_annotation: Any = None
+
+
+@dataclass(slots=True)
+class StructDeclaration(Statement):
+    name: str = ""
+    fields: list[tuple[str, Any]] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -117,4 +125,27 @@ class CallExpression(Expression):
 @dataclass(slots=True)
 class Grouping(Expression):
     expression: Expression | None = None
+
+
+@dataclass(slots=True)
+class ArrayLiteral(Expression):
+    elements: list[Expression] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class IndexExpression(Expression):
+    target: Expression | None = None
+    index: Expression | None = None
+
+
+@dataclass(slots=True)
+class MemberExpression(Expression):
+    target: Expression | None = None
+    member: str = ""
+
+
+@dataclass(slots=True)
+class StructLiteral(Expression):
+    name: str = ""
+    fields: list[tuple[str, Expression]] = field(default_factory=list)
 

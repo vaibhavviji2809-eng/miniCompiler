@@ -8,6 +8,10 @@ class Opcode(str, Enum):
     LOAD_NAME = "LOAD_NAME"
     STORE_NAME = "STORE_NAME"
     POP = "POP"
+    BUILD_ARRAY = "BUILD_ARRAY"
+    BUILD_STRUCT = "BUILD_STRUCT"
+    LOAD_INDEX = "LOAD_INDEX"
+    LOAD_MEMBER = "LOAD_MEMBER"
     BINARY_ADD = "BINARY_ADD"
     BINARY_SUB = "BINARY_SUB"
     BINARY_MUL = "BINARY_MUL"
@@ -30,4 +34,3 @@ class Opcode(str, Enum):
     CALL_DYNAMIC = "CALL_DYNAMIC"
     RETURN = "RETURN"
     PRINT = "PRINT"
-

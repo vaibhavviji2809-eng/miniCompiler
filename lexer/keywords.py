@@ -6,6 +6,7 @@ from .token_type import TokenType
 KEYWORDS = {
     "let": TokenType.LET,
     "fn": TokenType.FN,
+    "struct": TokenType.STRUCT,
     "if": TokenType.IF,
     "else": TokenType.ELSE,
     "while": TokenType.WHILE,
@@ -18,4 +19,3 @@ KEYWORDS = {
     "and": TokenType.AND,
     "or": TokenType.OR,
 }
-

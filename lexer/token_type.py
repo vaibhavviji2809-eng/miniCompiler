@@ -11,6 +11,7 @@ class TokenType(Enum):
 
     LET = auto()
     FN = auto()
+    STRUCT = auto()
     IF = auto()
     ELSE = auto()
     WHILE = auto()
@@ -27,6 +28,8 @@ class TokenType(Enum):
     RIGHT_PAREN = auto()
     LEFT_BRACE = auto()
     RIGHT_BRACE = auto()
+    LEFT_BRACKET = auto()
+    RIGHT_BRACKET = auto()
     COMMA = auto()
     DOT = auto()
     SEMICOLON = auto()
@@ -46,4 +49,3 @@ class TokenType(Enum):
     GREATER_EQUAL = auto()
     LESS = auto()
     LESS_EQUAL = auto()
-

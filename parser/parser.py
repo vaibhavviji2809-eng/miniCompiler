@@ -7,6 +7,7 @@ from ..lexer.token import Token
 from ..lexer.token_type import TokenType
 from .ast_nodes import (
     Assignment,
+    ArrayLiteral,
     BinaryExpression,
     Block,
     CallExpression,
@@ -16,10 +17,14 @@ from .ast_nodes import (
     FunctionDeclaration,
     Grouping,
     Identifier,
+    IndexExpression,
     IfStatement,
+    MemberExpression,
     Literal,
     PrintStatement,
     Program,
+    StructDeclaration,
+    StructLiteral,
     ReturnStatement,
     Statement,
     UnaryExpression,
@@ -57,6 +62,8 @@ class Parser:
             return self.parse_variable_declaration()
         if self.match(TokenType.FN):
             return self.parse_function()
+        if self.match(TokenType.STRUCT):
+            return self.parse_struct_declaration()
         if self.match(TokenType.IF):
             return self.parse_if()
         if self.match(TokenType.WHILE):
@@ -102,6 +109,21 @@ class Parser:
         self.consume(TokenType.LEFT_BRACE, "Expected '{' before function body")
         body = self.parse_block()
         return FunctionDeclaration(name=name.lexeme, params=params, body=body, line=name.line, column=name.column)
+
+    def parse_struct_declaration(self) -> StructDeclaration:
+        name = self.consume(TokenType.IDENTIFIER, "Expected struct name")
+        self.consume(TokenType.LEFT_BRACE, "Expected '{' after struct name")
+        fields: list[tuple[str, object]] = []
+        while not self.check(TokenType.RIGHT_BRACE):
+            field_name = self.consume(TokenType.IDENTIFIER, "Expected field name")
+            field_type = None
+            if self.match(TokenType.COLON):
+                field_type = self.parse_expression()
+            fields.append((field_name.lexeme, field_type))
+            if not self.match(TokenType.COMMA, TokenType.SEMICOLON):
+                break
+        self.consume(TokenType.RIGHT_BRACE, "Expected '}' after struct declaration")
+        return StructDeclaration(name=name.lexeme, fields=fields, line=name.line, column=name.column)
 
     def parse_if(self) -> IfStatement:
         self.consume(TokenType.LEFT_PAREN, "Expected '(' after if")
@@ -216,19 +238,44 @@ class Parser:
             operator = self.previous()
             operand = self.parse_unary()
             return UnaryExpression(operator=operator, operand=operand, line=operator.line, column=operator.column)
-        return self.parse_call()
+        return self.parse_postfix()
 
-    def parse_call(self) -> Expression:
+    def parse_postfix(self) -> Expression:
         expression = self.parse_primary()
-        while self.match(TokenType.LEFT_PAREN):
-            arguments: list[Expression] = []
-            if not self.check(TokenType.RIGHT_PAREN):
-                while True:
-                    arguments.append(self.parse_expression())
+        while True:
+            if self.match(TokenType.LEFT_PAREN):
+                arguments: list[Expression] = []
+                if not self.check(TokenType.RIGHT_PAREN):
+                    while True:
+                        arguments.append(self.parse_expression())
+                        if not self.match(TokenType.COMMA):
+                            break
+                paren = self.consume(TokenType.RIGHT_PAREN, "Expected ')' after arguments")
+                expression = CallExpression(callee=expression, arguments=arguments, line=paren.line, column=paren.column)
+                continue
+            if self.match(TokenType.LEFT_BRACKET):
+                index = self.parse_expression()
+                bracket = self.consume(TokenType.RIGHT_BRACKET, "Expected ']' after index")
+                expression = IndexExpression(target=expression, index=index, line=bracket.line, column=bracket.column)
+                continue
+            if self.match(TokenType.DOT):
+                member = self.consume(TokenType.IDENTIFIER, "Expected member name after '.'")
+                expression = MemberExpression(target=expression, member=member.lexeme, line=member.line, column=member.column)
+                continue
+            if self.check(TokenType.LEFT_BRACE) and isinstance(expression, Identifier):
+                self.advance()
+                fields: list[tuple[str, Expression]] = []
+                while not self.check(TokenType.RIGHT_BRACE):
+                    field = self.consume(TokenType.IDENTIFIER, "Expected field name")
+                    self.consume(TokenType.COLON, "Expected ':' after field name")
+                    value = self.parse_expression()
+                    fields.append((field.lexeme, value))
                     if not self.match(TokenType.COMMA):
                         break
-            paren = self.consume(TokenType.RIGHT_PAREN, "Expected ')' after arguments")
-            expression = CallExpression(callee=expression, arguments=arguments, line=paren.line, column=paren.column)
+                brace = self.consume(TokenType.RIGHT_BRACE, "Expected '}' after struct literal")
+                expression = StructLiteral(name=expression.name, fields=fields, line=brace.line, column=brace.column)
+                continue
+            break
         return expression
 
     def parse_primary(self) -> Expression:
@@ -254,6 +301,15 @@ class Parser:
             expression = self.parse_expression()
             self.consume(TokenType.RIGHT_PAREN, "Expected ')' after expression")
             return Grouping(expression=expression, line=expression.line, column=expression.column)
+        if self.match(TokenType.LEFT_BRACKET):
+            elements: list[Expression] = []
+            if not self.check(TokenType.RIGHT_BRACKET):
+                while True:
+                    elements.append(self.parse_expression())
+                    if not self.match(TokenType.COMMA):
+                        break
+            bracket = self.consume(TokenType.RIGHT_BRACKET, "Expected ']' after array literal")
+            return ArrayLiteral(elements=elements, line=bracket.line, column=bracket.column)
         raise ParseError(f"Unexpected token {self.peek().type.name}")
 
     def match(self, *types: TokenType) -> bool:
@@ -286,4 +342,3 @@ class Parser:
 
     def previous(self) -> Token:
         return self.tokens[self.current - 1]
-

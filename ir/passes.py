@@ -1,26 +1,77 @@
 from __future__ import annotations
 
-from collections import defaultdict
-
+from .control_flow import ControlFlowGraph
 from .ir_instruction import IRInstruction
 
 
-def constant_propagation(instructions: list[IRInstruction]) -> list[IRInstruction]:
+PURE_BINARY_OPS = {
+    "BINARY_ADD",
+    "BINARY_SUB",
+    "BINARY_MUL",
+    "BINARY_DIV",
+    "BINARY_MOD",
+    "BINARY_SHL",
+    "BINARY_AND",
+    "BINARY_OR",
+    "COMPARE_EQ",
+    "COMPARE_NE",
+    "COMPARE_LT",
+    "COMPARE_LTE",
+    "COMPARE_GT",
+    "COMPARE_GTE",
+}
+
+PURE_UNARY_OPS = {"UNARY_NEG", "UNARY_NOT"}
+
+
+def copy_propagation(instructions: list[IRInstruction]) -> list[IRInstruction]:
+    aliases: dict[str, str] = {}
     propagated: list[IRInstruction] = []
-    constants: dict[str, object] = {}
     for instruction in instructions:
         opcode = instruction.opcode
-        if opcode == "LOAD_NAME" and instruction.operands[0] in constants:
-            propagated.append(IRInstruction("LOAD_CONST", (constants[instruction.operands[0]],)))
+        if opcode == "LOAD_NAME":
+            name = instruction.operands[0]
+            while name in aliases and aliases[name] != name:
+                name = aliases[name]
+            propagated.append(IRInstruction("LOAD_NAME", (name,)))
             continue
-        if opcode == "STORE_NAME":
-            if propagated and propagated[-1].opcode == "LOAD_CONST":
-                constants[instruction.operands[0]] = propagated[-1].operands[0]
+        if opcode == "STORE_NAME" and propagated:
+            source = propagated[-1]
+            destination = instruction.operands[0]
+            if source.opcode == "LOAD_NAME":
+                aliases[destination] = source.operands[0]
             else:
-                constants.pop(instruction.operands[0], None)
+                aliases.pop(destination, None)
             propagated.append(instruction)
             continue
-        if opcode in {"CALL", "CALL_DYNAMIC", "RETURN", "JUMP", "JUMP_IF_FALSE", "LABEL"}:
+        if opcode in {"CALL", "CALL_DYNAMIC", "RETURN", "JUMP", "JUMP_IF_FALSE", "LABEL", "PRINT"}:
+            aliases.clear()
+        propagated.append(instruction)
+    return propagated
+
+
+def constant_propagation(instructions: list[IRInstruction]) -> list[IRInstruction]:
+    constants: dict[str, object] = {}
+    propagated: list[IRInstruction] = []
+    for instruction in instructions:
+        opcode = instruction.opcode
+        if opcode == "LOAD_NAME":
+            name = instruction.operands[0]
+            if name in constants:
+                propagated.append(IRInstruction("LOAD_CONST", (constants[name],)))
+            else:
+                propagated.append(instruction)
+            continue
+        if opcode == "STORE_NAME" and propagated:
+            source = propagated[-1]
+            destination = instruction.operands[0]
+            if source.opcode == "LOAD_CONST":
+                constants[destination] = source.operands[0]
+            else:
+                constants.pop(destination, None)
+            propagated.append(instruction)
+            continue
+        if opcode in {"CALL", "CALL_DYNAMIC", "RETURN", "JUMP", "JUMP_IF_FALSE", "LABEL", "PRINT"}:
             constants.clear()
         propagated.append(instruction)
     return propagated
@@ -35,45 +86,49 @@ def constant_folding(instructions: list[IRInstruction]) -> list[IRInstruction]:
             changed = False
             if len(folded) >= 3:
                 left, right, operator = folded[-3:]
-                if left.opcode == right.opcode == "LOAD_CONST" and operator.opcode in BINARY_OPERATIONS:
-                    result = evaluate_binary(operator.opcode, left.operands[0], right.operands[0])
-                    folded[-3:] = [IRInstruction("LOAD_CONST", (result,))]
+                if left.opcode == right.opcode == "LOAD_CONST" and operator.opcode in PURE_BINARY_OPS:
+                    folded[-3:] = [IRInstruction("LOAD_CONST", (evaluate_binary(operator.opcode, left.operands[0], right.operands[0]),))]
                     changed = True
                     continue
             if len(folded) >= 2:
                 operand, operator = folded[-2:]
-                if operand.opcode == "LOAD_CONST" and operator.opcode in UNARY_OPERATIONS:
-                    result = evaluate_unary(operator.opcode, operand.operands[0])
-                    folded[-2:] = [IRInstruction("LOAD_CONST", (result,))]
+                if operand.opcode == "LOAD_CONST" and operator.opcode in PURE_UNARY_OPS:
+                    folded[-2:] = [IRInstruction("LOAD_CONST", (evaluate_unary(operator.opcode, operand.operands[0]),))]
                     changed = True
     return folded
 
 
 def dead_code_elimination(instructions: list[IRInstruction]) -> list[IRInstruction]:
+    cfg = ControlFlowGraph.from_function(type("PseudoFunction", (), {"instructions": instructions})())
+    reachable_blocks = cfg.reachable_blocks()
     cleaned: list[IRInstruction] = []
-    skipping = False
-    for instruction in instructions:
-        if skipping:
-            if instruction.opcode == "LABEL":
-                skipping = False
-                cleaned.append(instruction)
+    for block_name, block in cfg.blocks.items():
+        if block_name not in reachable_blocks:
             continue
-        cleaned.append(instruction)
-        if instruction.opcode in {"RETURN", "JUMP"}:
-            skipping = True
+        cleaned.extend(block.instructions)
+    if not cleaned:
+        return instructions[:1]
     return cleaned
 
 
 def strength_reduction(instructions: list[IRInstruction]) -> list[IRInstruction]:
     reduced: list[IRInstruction] = []
-    for instruction in instructions:
-        if instruction.opcode == "BINARY_MUL" and len(reduced) >= 1:
-            previous = reduced[-1]
-            if previous.opcode == "LOAD_CONST" and previous.operands[0] == 2:
-                reduced[-1] = IRInstruction("LOAD_CONST", (1,))
-                reduced.append(IRInstruction("BINARY_SHL"))
-                continue
-        reduced.append(instruction)
+    index = 0
+    while index < len(instructions):
+        window = instructions[index:index + 3]
+        if len(window) == 3:
+            left, right, operator = window
+            if operator.opcode == "BINARY_MUL":
+                if left.opcode == "LOAD_NAME" and right.opcode == "LOAD_CONST" and right.operands[0] == 2:
+                    reduced.extend([left, IRInstruction("LOAD_CONST", (1,)), IRInstruction("BINARY_SHL")])
+                    index += 3
+                    continue
+                if right.opcode == "LOAD_NAME" and left.opcode == "LOAD_CONST" and left.operands[0] == 2:
+                    reduced.extend([right, IRInstruction("LOAD_CONST", (1,)), IRInstruction("BINARY_SHL")])
+                    index += 3
+                    continue
+        reduced.append(instructions[index])
+        index += 1
     return reduced
 
 
@@ -92,66 +147,16 @@ def common_subexpression_elimination(instructions: list[IRInstruction]) -> list[
                 temp_index += 1
                 optimized.extend(window)
                 optimized.append(IRInstruction("STORE_NAME", (temp_name,)))
-                optimized.append(IRInstruction("LOAD_NAME", (temp_name,)))
                 cache[signature] = temp_name
-            else:
-                optimized.append(IRInstruction("LOAD_NAME", (temp_name,)))
+            optimized.append(IRInstruction("LOAD_NAME", (temp_name,)))
             index += 3
             continue
         instruction = instructions[index]
-        if instruction.opcode in {"STORE_NAME", "CALL", "CALL_DYNAMIC", "JUMP", "JUMP_IF_FALSE", "RETURN", "LABEL"}:
+        if instruction.opcode in {"STORE_NAME", "CALL", "CALL_DYNAMIC", "RETURN", "JUMP", "JUMP_IF_FALSE", "LABEL", "PRINT"}:
             cache.clear()
         optimized.append(instruction)
         index += 1
     return optimized
-
-
-BINARY_OPERATIONS = {
-    "BINARY_ADD",
-    "BINARY_SUB",
-    "BINARY_MUL",
-    "BINARY_DIV",
-    "BINARY_MOD",
-    "BINARY_SHL",
-    "BINARY_AND",
-    "BINARY_OR",
-    "COMPARE_EQ",
-    "COMPARE_NE",
-    "COMPARE_LT",
-    "COMPARE_LTE",
-    "COMPARE_GT",
-    "COMPARE_GTE",
-}
-
-UNARY_OPERATIONS = {"UNARY_NEG", "UNARY_NOT"}
-
-
-def is_pure_binary_pattern(window: list[IRInstruction]) -> bool:
-    left, right, operator = window
-    return left.opcode in {"LOAD_CONST", "LOAD_NAME"} and right.opcode in {"LOAD_CONST", "LOAD_NAME"} and operator.opcode in {
-        "BINARY_ADD",
-        "BINARY_SUB",
-        "BINARY_MUL",
-        "BINARY_DIV",
-        "BINARY_MOD",
-        "COMPARE_EQ",
-        "COMPARE_NE",
-        "COMPARE_LT",
-        "COMPARE_LTE",
-        "COMPARE_GT",
-        "COMPARE_GTE",
-    }
-
-
-def pattern_signature(window: list[IRInstruction]) -> tuple:
-    left, right, operator = window
-    return (
-        left.opcode,
-        left.operands[0] if left.operands else None,
-        right.opcode,
-        right.operands[0] if right.operands else None,
-        operator.opcode,
-    )
 
 
 def evaluate_binary(opcode: str, left: object, right: object) -> object:
@@ -192,4 +197,20 @@ def evaluate_unary(opcode: str, operand: object) -> object:
     if opcode == "UNARY_NOT":
         return not bool(operand)
     raise ValueError(f"Unsupported unary opcode {opcode}")
+
+
+def is_pure_binary_pattern(window: list[IRInstruction]) -> bool:
+    left, right, operator = window
+    return left.opcode in {"LOAD_CONST", "LOAD_NAME"} and right.opcode in {"LOAD_CONST", "LOAD_NAME"} and operator.opcode in PURE_BINARY_OPS
+
+
+def pattern_signature(window: list[IRInstruction]) -> tuple:
+    left, right, operator = window
+    return (
+        left.opcode,
+        left.operands[0] if left.operands else None,
+        right.opcode,
+        right.operands[0] if right.operands else None,
+        operator.opcode,
+    )
 

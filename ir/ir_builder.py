@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from ..lexer.token_type import TokenType
 from ..parser.ast_nodes import (
+    ArrayLiteral,
     Assignment,
     BinaryExpression,
     Block,
@@ -15,11 +16,15 @@ from ..parser.ast_nodes import (
     Grouping,
     Identifier,
     IfStatement,
+    IndexExpression,
     Literal,
+    MemberExpression,
     PrintStatement,
     Program,
     ReturnStatement,
     Statement,
+    StructDeclaration,
+    StructLiteral,
     UnaryExpression,
     VariableDeclaration,
     WhileStatement,
@@ -60,6 +65,8 @@ class IRBuilder:
             return
         if isinstance(statement, FunctionDeclaration):
             self.program_functions[statement.name] = self._compile_function(statement)
+            return
+        if isinstance(statement, StructDeclaration):
             return
         if isinstance(statement, IfStatement):
             self._compile_if(statement, function, context)
@@ -150,10 +157,30 @@ class IRBuilder:
         if isinstance(expression, Grouping):
             self._compile_expression(expression.expression, function, context)
             return
+        if isinstance(expression, ArrayLiteral):
+            for element in expression.elements:
+                self._compile_expression(element, function, context)
+            function.instructions.append(IRInstruction("BUILD_ARRAY", (len(expression.elements),)))
+            return
+        if isinstance(expression, StructLiteral):
+            for _, value in expression.fields:
+                self._compile_expression(value, function, context)
+            field_names = tuple(name for name, _ in expression.fields)
+            function.instructions.append(IRInstruction("BUILD_STRUCT", (expression.name, field_names, len(expression.fields))))
+            return
         if isinstance(expression, Assignment):
             self._compile_expression(expression.value, function, context)
             function.instructions.append(IRInstruction("STORE_NAME", (expression.target,)))
             function.instructions.append(IRInstruction("LOAD_NAME", (expression.target,)))
+            return
+        if isinstance(expression, IndexExpression):
+            self._compile_expression(expression.target, function, context)
+            self._compile_expression(expression.index, function, context)
+            function.instructions.append(IRInstruction("LOAD_INDEX"))
+            return
+        if isinstance(expression, MemberExpression):
+            self._compile_expression(expression.target, function, context)
+            function.instructions.append(IRInstruction("LOAD_MEMBER", (expression.member,)))
             return
         if isinstance(expression, UnaryExpression):
             self._compile_expression(expression.operand, function, context)
@@ -197,4 +224,3 @@ class IRBuilder:
     def _label(self, context: BuildContext, prefix: str) -> str:
         context.label_counter += 1
         return f"{context.name}_{prefix}_{context.label_counter}"
-

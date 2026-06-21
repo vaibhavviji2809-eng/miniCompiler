@@ -8,10 +8,12 @@ from pathlib import Path
 from typing import Any
 
 from .bytecode.compiler import compile_ir_to_bytecode
+from .ir.jit import JITCompiler, MachineRuntime
 from .ir.ir_builder import IRBuilder
 from .ir.optimizer import optimize_program
 from .parser.ast_nodes import (
     Assignment,
+    ArrayLiteral,
     BinaryExpression,
     Block,
     CallExpression,
@@ -22,11 +24,15 @@ from .parser.ast_nodes import (
     Grouping,
     Identifier,
     IfStatement,
+    IndexExpression,
     Literal,
+    MemberExpression,
     PrintStatement,
     Program,
     ReturnStatement,
     Statement,
+    StructDeclaration,
+    StructLiteral,
     UnaryExpression,
     VariableDeclaration,
     WhileStatement,
@@ -42,14 +48,15 @@ def load_source(path: str | Path) -> str:
     return Path(path).read_text(encoding="utf-8")
 
 
-def compile_source(source: str) -> tuple[Program, object, object]:
+def compile_source(source: str) -> tuple[Program, object, object, object]:
     program = Parser(source).parse()
     semantic = SemanticAnalyzer()
     semantic.analyze(program)
     ir_program = IRBuilder().build(program)
     optimized_program = optimize_program(ir_program)
     bytecode_program = compile_ir_to_bytecode(optimized_program)
-    return program, optimized_program, bytecode_program
+    machine_program = JITCompiler().compile_program(optimized_program)
+    return program, optimized_program, bytecode_program, machine_program
 
 
 def format_ast(node: Any, indent: int = 0) -> str:
@@ -64,7 +71,7 @@ def format_ast(node: Any, indent: int = 0) -> str:
         if field.name in {"line", "column"}:
             continue
         value = getattr(node, field.name)
-        if isinstance(value, (Literal, Identifier, UnaryExpression, BinaryExpression, CallExpression, Grouping, Assignment, ExpressionStatement, VariableDeclaration, PrintStatement, ReturnStatement, IfStatement, WhileStatement, ForStatement, Block, FunctionDeclaration, Program)):
+        if isinstance(value, (Literal, Identifier, UnaryExpression, BinaryExpression, CallExpression, Grouping, Assignment, ExpressionStatement, VariableDeclaration, PrintStatement, ReturnStatement, IfStatement, WhileStatement, ForStatement, Block, FunctionDeclaration, StructDeclaration, StructLiteral, ArrayLiteral, IndexExpression, MemberExpression, Program)):
             details.append(f"{field.name}:\n{format_ast(value, indent + 1)}")
         elif isinstance(value, list):
             if value and any(is_dataclass(item) for item in value):
@@ -97,6 +104,16 @@ def format_bytecode(program: object) -> str:
         for index, instruction in enumerate(function.instructions):
             operands = ", ".join(repr(operand) for operand in instruction.operands)
             lines.append(f"  {index:04d}: {instruction.opcode.value} {operands}".rstrip())
+    return "\n".join(lines)
+
+
+def format_machine_code(program: object) -> str:
+    lines: list[str] = []
+    for function in [program.main, *program.functions.values()]:
+        lines.append(f"function {function.name}({', '.join(function.params)})")
+        for index, instruction in enumerate(function.instructions):
+            operands = ", ".join(repr(operand) for operand in instruction.operands)
+            lines.append(f"  {index:04d}: {instruction.opcode} {operands}".rstrip())
     return "\n".join(lines)
 
 
@@ -134,7 +151,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="mc", description="MiniCompiler toolchain")
     subcommands = parser.add_subparsers(dest="command", required=True)
 
-    for command in ["build", "compile", "run", "ast", "ir", "bytecode", "repl"]:
+    for command in ["build", "compile", "run", "jit", "ast", "ir", "bytecode", "machinecode", "repl"]:
         subcommands.add_parser(command).add_argument("source", nargs="?")
 
     return parser
@@ -150,7 +167,7 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("A source file path is required")
 
     source = load_source(args.source)
-    ast_program, ir_program, bytecode_program = compile_source(source)
+    ast_program, ir_program, bytecode_program, machine_program = compile_source(source)
 
     if args.command == "ast":
         print(format_ast(ast_program))
@@ -161,14 +178,26 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "bytecode":
         print(format_bytecode(bytecode_program))
         return 0
+    if args.command == "machinecode":
+        print(format_machine_code(machine_program))
+        return 0
     if args.command in {"build", "compile"}:
-        print(format_bytecode(bytecode_program))
+        print(format_machine_code(machine_program))
         return 0
     if args.command == "run":
         vm = VirtualMachine(bytecode_program)
         value = vm.run()
         if vm.outputs:
             for item in vm.outputs:
+                print(item)
+        elif value is not None:
+            print(value)
+        return 0
+    if args.command == "jit":
+        runtime = MachineRuntime(machine_program)
+        value = runtime.run()
+        if runtime.outputs:
+            for item in runtime.outputs:
                 print(item)
         elif value is not None:
             print(value)

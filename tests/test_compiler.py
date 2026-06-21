@@ -3,6 +3,11 @@ from __future__ import annotations
 import unittest
 
 from MiniCompiler.cli import compile_source, execute_source
+from MiniCompiler.ir.control_flow import ControlFlowGraph, detect_loops
+from MiniCompiler.ir.ir_builder import IRBuilder
+from MiniCompiler.ir.optimizer import optimize_program
+from MiniCompiler.ir.register_allocation import allocate_registers, live_variable_analysis
+from MiniCompiler.ir.jit import JITCompiler, MachineRuntime
 from MiniCompiler.lexer.lexer import Lexer
 from MiniCompiler.lexer.token_type import TokenType
 from MiniCompiler.parser.parser import Parser
@@ -68,7 +73,46 @@ class CompilerTests(unittest.TestCase):
         result, _, _, _ = execute_source(source)
         self.assertEqual(result, 6)
 
+    def test_arrays_and_structs(self) -> None:
+        source = """
+        struct Point { x: int, y: int }
+        let values = [1, 2, 3];
+        let point = Point { x: 7, y: 5 };
+        print(values[1] + point.y);
+        """
+        result, _, _, _ = execute_source(source)
+        self.assertEqual(result, 7)
+
+    def test_cfg_and_loops(self) -> None:
+        program = Parser(
+            """
+            let i = 0;
+            while (i < 3) {
+                i = i + 1;
+            }
+            """
+        ).parse()
+        ir_program = optimize_program(IRBuilder().build(program))
+        cfg = ControlFlowGraph.from_function(ir_program.main)
+        self.assertGreaterEqual(len(cfg.blocks), 1)
+        self.assertTrue(detect_loops(cfg))
+
+    def test_register_allocation(self) -> None:
+        program = Parser("let x = 1; let y = x + 2; print(y);").parse()
+        ir_program = optimize_program(IRBuilder().build(program))
+        allocation = allocate_registers(ir_program.main)
+        self.assertIn("x", allocation.interference_graph)
+        self.assertGreaterEqual(len(allocation.register_map), 1)
+
+    def test_jit_backend(self) -> None:
+        program = Parser(FIBONACCI_SOURCE).parse()
+        ir_program = optimize_program(IRBuilder().build(program))
+        machine_program = JITCompiler().compile_program(ir_program)
+        runtime = MachineRuntime(machine_program)
+        result = runtime.run()
+        self.assertEqual(result, 55)
+        self.assertEqual(runtime.outputs[-1], 55)
+
 
 if __name__ == "__main__":
     unittest.main()
-

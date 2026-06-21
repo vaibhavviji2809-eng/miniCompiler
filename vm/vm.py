@@ -41,6 +41,29 @@ class VirtualMachine:
                 if len(current.stack) > 0:
                     last_value = current.stack.pop()
                 continue
+            if opcode == Opcode.BUILD_ARRAY:
+                count = instruction.operands[0]
+                values = [current.stack.pop() for _ in range(count)][::-1]
+                current.stack.push(values)
+                continue
+            if opcode == Opcode.BUILD_STRUCT:
+                struct_name, field_names, count = instruction.operands
+                values = [current.stack.pop() for _ in range(count)][::-1]
+                current.stack.push({"__struct__": struct_name, **dict(zip(field_names, values))})
+                continue
+            if opcode == Opcode.LOAD_INDEX:
+                index = current.stack.pop()
+                target = current.stack.pop()
+                current.stack.push(target[index])
+                continue
+            if opcode == Opcode.LOAD_MEMBER:
+                member = instruction.operands[0]
+                target = current.stack.pop()
+                if isinstance(target, dict):
+                    current.stack.push(target[member])
+                else:
+                    current.stack.push(getattr(target, member))
+                continue
             if opcode == Opcode.UNARY_NEG:
                 current.stack.push(-current.stack.pop())
                 continue

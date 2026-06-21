@@ -3,17 +3,17 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .scope import Scope
-from .types import TypeKind
+from .types import ANY_TYPE, Type, TypeKind, UNKNOWN_TYPE
 
 
 @dataclass
 class Symbol:
     name: str
-    type: TypeKind = TypeKind.ANY
+    type: Type = ANY_TYPE
     scope: str = "global"
     location: int | None = None
-    params: list[TypeKind] = field(default_factory=list)
-    return_type: TypeKind = TypeKind.ANY
+    params: list[Type] = field(default_factory=list)
+    return_type: Type = UNKNOWN_TYPE
 
 
 class SymbolTable:
@@ -44,4 +44,3 @@ class SymbolTable:
 
     def remove(self, name: str) -> None:
         self.current_scope.remove(name)
-

@@ -30,5 +30,6 @@ print(fibonacci(10));
 - `python mc.py ast examples/fibonacci.mc`
 - `python mc.py ir examples/fibonacci.mc`
 - `python mc.py bytecode examples/fibonacci.mc`
+- `python mc.py machinecode examples/fibonacci.mc`
+- `python mc.py jit examples/fibonacci.mc`
 - `python mc.py run examples/fibonacci.mc`
-

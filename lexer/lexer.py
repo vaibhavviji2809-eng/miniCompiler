@@ -132,6 +132,10 @@ class Lexer:
             return Token(TokenType.LEFT_BRACE, char, None, self.line, self.start_column)
         if char == "}":
             return Token(TokenType.RIGHT_BRACE, char, None, self.line, self.start_column)
+        if char == "[":
+            return Token(TokenType.LEFT_BRACKET, char, None, self.line, self.start_column)
+        if char == "]":
+            return Token(TokenType.RIGHT_BRACKET, char, None, self.line, self.start_column)
         if char == ",":
             return Token(TokenType.COMMA, char, None, self.line, self.start_column)
         if char == ".":
